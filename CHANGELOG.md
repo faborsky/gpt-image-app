@@ -15,6 +15,27 @@ All notable changes to this project are documented here. Format follows [Keep a 
   condition that triggers it. A regression test asserts the generator console
   writes to stderr.
 
+### Verified against the live API
+
+Once the outage lifted, everything the outage had blocked was confirmed end to end:
+
+- **Cost is real, not estimated.** A `quality=low` 1024x1024 run reported
+  `cost_source: "actual (24 in + 202 out tokens)"` → **$0.0063**, matching the published
+  $0.006 for that tier.
+- **The `--json` fix holds under real retries.** That same run came back with
+  `attempts: 3` (two 500s, then success) and still produced valid, parseable JSON on
+  stdout with the retry notices on stderr — the exact scenario that used to break it.
+- **The transparency guard matches reality.** `gpt-image-2` rejects
+  `background="transparent"` with a non-retryable `400 image_generation_user_error`
+  ("Transparent background is not supported for this model"), and the documented
+  workaround works: `gpt-image-1.5` returns a true RGBA image with transparent pixels.
+- **`describe` works** on `gpt-5.4-mini`, returning a usable prompt-style description.
+- **Size mapping is correct in practice:** `1:1 @ 1K` → `1072x1072`, above the ~1 MP minimum.
+
+Operational note: the outage was neither uniform nor all-or-nothing. `models.list` recovered
+while `images.generate` was still failing, and later the reverse. A health check on one
+endpoint says nothing about another — probe the one you need.
+
 ## [1.0.0] — 2026-07-25
 
 First production release. The tool stops being an internal A/B experiment and becomes a standalone image generation CLI: correct pricing, a guard against parameter combinations the API rejects, retry logic suited to an endpoint that really does return 500s, documented behaviour, and a bundled Claude Code skill.
@@ -56,4 +77,5 @@ First production release. The tool stops being an internal A/B experiment and be
 
 ### Notes
 
-OpenAI's image endpoint was returning `500` for every model — and for `chat.completions` as well — throughout the final verification window for this release. Consequently the transparency rejection and the `usage`-based cost path are implemented from the documented behaviour rather than from a live observation. Both are covered by offline tests; the first live run should confirm `cost_source` reports `actual (…)`.
+An OpenAI-wide outage (status.openai.com: "Elevated error rates") ran through this release's
+verification window. Everything was verified against the live API once it recovered — see 1.0.1.

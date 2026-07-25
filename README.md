@@ -182,7 +182,11 @@ Token rates per 1M tokens:
 
 ## Transparency
 
-**`gpt-image-2` does not support transparent backgrounds.** Requests with `background: transparent` are rejected by the API.
+**`gpt-image-2` does not support transparent backgrounds.** Requests with `background: transparent` are rejected by the API with a `400`:
+
+```
+Transparent background is not supported for this model.
+```
 
 The CLI catches this *before* making the call and tells you the two ways forward:
 

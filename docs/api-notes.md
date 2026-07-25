@@ -60,7 +60,17 @@ Per the docs, verbatim: *"gpt-image-2 doesn't currently support transparent back
 1. Model support — only `gpt-image-1` / `1.5` / `mini` can do it.
 2. Container — transparency needs an alpha channel, so `jpeg` is impossible regardless of model.
 
-> Not verified live: OpenAI's image endpoint was returning 500 for every model during this release's development, so the rejection is implemented from the documented behaviour rather than from an observed error. If the docs change, this guard is the first thing to revisit.
+**Verified live (2026-07-25).** The API rejects it with a clean, non-transient `400`:
+
+```
+400 - {'error': {'message': 'Transparent background is not supported for this model.',
+                 'type': 'image_generation_user_error',
+                 'param': 'background', 'code': 'invalid_value'}}
+```
+
+Note the code is `400`, not `5xx` — so `is_retryable_error()` correctly refuses to retry it, and the local guard means the request never leaves the machine in the first place.
+
+The documented workaround was verified too: `gpt-image-1.5` with `background="transparent"` and `output_format="png"` returns a genuine **RGBA** image with actually transparent pixels (checked via PIL's alpha channel extrema, not just the mode flag).
 
 ## Response shape
 
@@ -76,6 +86,11 @@ Image bytes always arrive **base64-encoded** in `b64_json` — there is no URL m
 ## Pricing mechanics
 
 Images are billed as **tokens**: input (prompt text plus any reference image) and image output tokens.
+
+**Verified live (2026-07-25):** a `quality=low` 1024x1024 call returned
+`input_tokens=24, output_tokens=202`, which at the rates below is **$0.0063** — matching
+the published $0.006 per-image figure for that tier. So `usage` is real, it is returned on
+image calls, and computing cost from it is accurate rather than a guess.
 
 Token rates per 1M ([source](https://developers.openai.com/api/docs/pricing)):
 
@@ -115,7 +130,14 @@ The SDK raises `openai.APIStatusError` subclasses carrying `.status_code` — `R
 | 404 | unknown model | no |
 | — | timeouts, connection resets (no code) | **yes**, matched on message |
 
-**500s are a normal operating condition on this endpoint.** During the work on 1.0.0, `images.generate` returned 500 for `gpt-image-2`, `gpt-image-1-mini` *and* `chat.completions` across repeated attempts over an extended period — a genuine OpenAI-side outage. That is precisely why 5xx is retryable and why the CLI reports the underlying message instead of a generic failure.
+**500s are a normal operating condition on this endpoint.** During the work on 1.0.0 there was a genuine OpenAI-side outage (confirmed on status.openai.com as "Elevated error rates" across APIs, ChatGPT and Codex) in which `images.generate`, `models.list` *and* `chat.completions` all returned 500 for over an hour.
+
+Two things learned from it, both worth knowing before you write your own client:
+
+1. **An outage is not all-or-nothing, and it is not uniform across endpoints.** At one point `models.list` recovered (125 models) while `images.generate` still failed; twenty minutes later the reverse was true — image generation worked while `models.list` and `chat.completions` were down. So a health check against one endpoint tells you nothing reliable about another. Probe the endpoint you actually need.
+2. **Retrying genuinely rescues calls during this.** The first successful verification run came back with `attempts: 3` — two 500s, then a success. Without retry that image would simply have failed. Also seen mid-outage: `503 {'error': 'Too many concurrent requests'}`, i.e. overload stacked on top of the outage.
+
+That is why 5xx is retryable, why backoff carries jitter, and why the CLI surfaces the underlying provider message instead of a generic failure.
 
 **Backoff is exponential with jitter**, capped at 60 s: `min(base * 2**attempt, 60) * uniform(0.5, 1.0)`. OpenAI's own guidance recommends jitter explicitly — without it, parallel runs that hit the same limit retry in lockstep and collide again.
 
@@ -158,5 +180,4 @@ Documented so nobody rediscovers them as bugs:
 - Rate-limit headers not read; pacing is reactive (retry on 429) rather than proactive.
 - Uses the standard endpoint, not the ~50 % cheaper asynchronous Batch API.
 - `batch` is strictly sequential by design, to stay clear of IPM limits.
-- The transparency guard is implemented from documented behaviour, not from an observed API rejection (see above).
 - `FALLBACK_COST` for the non-flagship models is derived from token rates, not officially published per-image figures.
