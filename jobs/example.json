@@ -1,0 +1,25 @@
+{
+  "defaults": {
+    "aspect_ratio": "16:9",
+    "resolution": "1K",
+    "quality": "medium",
+    "format": "png"
+  },
+  "jobs": [
+    {
+      "prompt": "Photorealistic product shot of a matte ceramic pour-over coffee dripper on a pale oak countertop, morning window light from the left, shallow depth of field, warm neutral palette",
+      "output_name": "coffee_dripper"
+    },
+    {
+      "prompt": "Editorial illustration of a city at dusk rendered as layered paper cut-outs, deep teal and amber palette, soft shadows between layers, flat graphic style",
+      "output_name": "paper_city",
+      "quality": "high"
+    },
+    {
+      "prompt": "A clean infographic poster on a warm off-white background. Render the headline \"SLOW MORNINGS\" in a heavy geometric sans-serif across the top third, verbatim, no extra characters. Below it, three simple line-art icons in a row.",
+      "output_name": "slow_mornings_poster",
+      "aspect_ratio": "4:5",
+      "quality": "high"
+    }
+  ]
+}
