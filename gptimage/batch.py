@@ -24,9 +24,12 @@ from gptimage.config import (
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_QUALITY,
     DEFAULT_RESOLUTION,
+    MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_IMAGES,
     SUPPORTED_IMAGE_FORMATS,
     VALID_ASPECT_RATIOS,
     VALID_BACKGROUNDS,
+    VALID_INPUT_FIDELITY,
     VALID_OUTPUT_FORMATS,
     VALID_QUALITIES,
     VALID_RESOLUTIONS,
@@ -47,8 +50,9 @@ class JobConfig:
     quality: str = DEFAULT_QUALITY
     background: str = DEFAULT_BACKGROUND
     output_name: str | None = None
-    reference_path: Path | None = None
+    reference_paths: list[Path] = field(default_factory=list)
     output_format: str = DEFAULT_OUTPUT_FORMAT
+    input_fidelity: str | None = None
 
 
 @dataclass
@@ -123,10 +127,11 @@ class BatchProcessor:
                     resolution=job.resolution,
                     output_dir=self._output_dir,
                     custom_name=job.output_name,
-                    reference_path=job.reference_path,
+                    reference_paths=job.reference_paths,
                     output_format=job.output_format,
                     quality=job.quality,
                     background=job.background,
+                    input_fidelity=job.input_fidelity,
                 )
                 result.results.append((job, gen_result))
 
@@ -163,6 +168,7 @@ def parse_job_file(job_file: Path) -> BatchConfig:
     d_quality = defaults.get("quality", DEFAULT_QUALITY)
     d_background = defaults.get("background", DEFAULT_BACKGROUND)
     d_format = defaults.get("format", DEFAULT_OUTPUT_FORMAT)
+    d_input_fidelity = defaults.get("input_fidelity")
 
     jobs: list[JobConfig] = []
     for i, job_data in enumerate(data["jobs"]):
@@ -171,7 +177,6 @@ def parse_job_file(job_file: Path) -> BatchConfig:
         if "prompt" not in job_data:
             raise ValueError(f"Job {i + 1} missing required 'prompt' field")
 
-        ref_path = Path(job_data["reference_path"]) if "reference_path" in job_data else None
         jobs.append(
             JobConfig(
                 prompt=job_data["prompt"],
@@ -180,11 +185,30 @@ def parse_job_file(job_file: Path) -> BatchConfig:
                 quality=job_data.get("quality", d_quality),
                 background=job_data.get("background", d_background),
                 output_name=job_data.get("output_name"),
-                reference_path=ref_path,
+                reference_paths=_reference_paths(job_data),
                 output_format=job_data.get("format", d_format),
+                input_fidelity=job_data.get("input_fidelity", d_input_fidelity),
             )
         )
     return BatchConfig(jobs=jobs)
+
+
+def _reference_paths(job_data: dict) -> list[Path]:
+    """
+    Read reference images from a job entry, accepting both shapes.
+
+    `reference_path` may be a single string (the original format, still supported) or
+    a list; `reference_paths` is the explicit plural. Several references are what make
+    compositing work — e.g. one product image plus one target scene.
+    """
+    raw = job_data.get("reference_paths", job_data.get("reference_path"))
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [Path(raw)]
+    if isinstance(raw, list):
+        return [Path(item) for item in raw]
+    return []
 
 
 def validate_job_file(job_file: Path) -> list[str]:
@@ -234,16 +258,42 @@ def validate_job_file(job_file: Path) -> list[str]:
         if "output_name" in job and not isinstance(job["output_name"], str):
             errors.append(f"Job {n}: 'output_name' must be a string")
 
-        if "reference_path" in job:
-            if not isinstance(job["reference_path"], str):
-                errors.append(f"Job {n}: 'reference_path' must be a string")
+        _check(errors, job, "input_fidelity", VALID_INPUT_FIDELITY, f"Job {n}: ")
+
+        for key in ("reference_path", "reference_paths"):
+            if key not in job:
+                continue
+            raw = job[key]
+            if isinstance(raw, str):
+                refs = [raw]
+            elif isinstance(raw, list):
+                if not all(isinstance(item, str) for item in raw):
+                    errors.append(f"Job {n}: '{key}' list must contain strings")
+                    continue
+                refs = raw
             else:
-                ref_path = Path(job["reference_path"])
+                errors.append(f"Job {n}: '{key}' must be a string or a list of strings")
+                continue
+
+            if len(refs) > MAX_REFERENCE_IMAGES:
+                errors.append(
+                    f"Job {n}: too many reference images ({len(refs)}); "
+                    f"the edit endpoint accepts at most {MAX_REFERENCE_IMAGES}"
+                )
+
+            for ref in refs:
+                ref_path = Path(ref)
                 if not ref_path.exists():
                     errors.append(f"Job {n}: reference image not found: {ref_path}")
                 elif ref_path.suffix.lower() not in SUPPORTED_IMAGE_FORMATS:
                     valid = ", ".join(sorted(SUPPORTED_IMAGE_FORMATS))
                     errors.append(f"Job {n}: unsupported reference format. Valid: {valid}")
+                elif ref_path.stat().st_size > MAX_REFERENCE_BYTES:
+                    errors.append(
+                        f"Job {n}: reference image too large: {ref_path} "
+                        f"({ref_path.stat().st_size / 1024 / 1024:.1f} MB, limit "
+                        f"{MAX_REFERENCE_BYTES // 1024 // 1024} MB)"
+                    )
     return errors
 
 
@@ -319,6 +369,7 @@ def run_batch(
                             "resolution": job.resolution,
                             "quality": job.quality,
                             "size": res.size,
+                            "reference_count": res.reference_count,
                             "success": res.success,
                             "cost_usd": res.cost_usd,
                             "error": res.error_message,

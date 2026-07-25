@@ -51,6 +51,67 @@ The test suite asserts all four constraints across every aspect-ratio × resolut
 
 The other three models accept only `1024x1024`, `1536x1024`, `1024x1536` (or `auto`). `_snap_size_for_model()` maps the computed size to the nearest of those by ratio.
 
+## Reference images: how many, and what they cost
+
+The edit endpoint takes a **list** of files, and that list is the whole point — it is how
+compositing is expressed:
+
+```python
+client.images.edit(
+    model="gpt-image-2",
+    image=[open("product.png", "rb"), open("scene.png", "rb")],
+    prompt="Place the product from the first image onto the table from the second...",
+    size="1024x1024", quality="low", n=1,
+)
+```
+
+**Maximum 16 images** for GPT Image models, each png/webp/jpg under 50 MB (dall-e-2 took
+exactly one, square png under 4 MB). If a mask is supplied it applies to the first image.
+Source: OpenAI API reference. Verified live 2026-07-25 with a two-image composite.
+
+**They are billed as input image tokens**, which dominates the cost of a small edit.
+Measured on identical 1024×1024 `low` runs:
+
+| Call | input_tokens | of which image_tokens | Cost |
+|---|---|---|---|
+| text only | 24 | 0 | $0.0063 |
+| two references | 2365 | 2337 | **$0.025** |
+
+So references cost roughly 4× the base image here. Reach for `low` while iterating on a
+composite, and don't assume the published per-image table applies — it covers text-only
+generation.
+
+`generator.py` opens the handles inside an `ExitStack`, so every file closes even when the
+call raises. That matters because a retry reopens them.
+
+## input_fidelity
+
+Controls how strongly the model preserves detail from input images. **Only on the older
+models** — `gpt-image-1`, `gpt-image-1.5`, `gpt-image-1-mini`.
+
+`gpt-image-2` rejects it with a non-retryable `400` (verified live 2026-07-25):
+
+```
+400 - {'error': {'message': "The model 'gpt-image-2' does not support the
+                 'input_fidelity' parameter.",
+                 'type': 'image_generation_user_error',
+                 'param': 'input_fidelity', 'code': 'invalid_value'}}
+```
+
+The docs give the reason: *"For `gpt-image-2`, omit this parameter; the API doesn't allow
+changing it because the model processes every image input at high fidelity automatically."*
+`validate_input_fidelity_for_model()` enforces this locally.
+
+On models that accept it, the setting is a **significant cost lever** — the same edit on
+`gpt-image-1.5` used **4791** total tokens at `high` versus **618** at `low`, roughly 8×.
+
+**Observed limit of "automatically high fidelity":** in a two-reference composite on
+`gpt-image-2`, a prompt that explicitly demanded the product's fine surface markings be
+preserved ("keep the ripeness spots exactly as they are") produced an output that kept
+shape and colour but dropped the markings. The parameter cannot be raised on that model,
+so for detail-critical edits `gpt-image-1.5` with `input_fidelity="high"` is the escape
+hatch worth testing.
+
 ## Transparency
 
 Per the docs, verbatim: *"gpt-image-2 doesn't currently support transparent backgrounds. Requests with `background: "transparent"` aren't supported for this model."*
@@ -175,7 +236,6 @@ From OpenAI's [prompting guide](https://developers.openai.com/cookbook/examples/
 
 Documented so nobody rediscovers them as bugs:
 
-- One reference image per job.
 - `moderation` parameter not exposed.
 - Rate-limit headers not read; pacing is reactive (retry on 429) rather than proactive.
 - Uses the standard endpoint, not the ~50 % cheaper asynchronous Batch API.

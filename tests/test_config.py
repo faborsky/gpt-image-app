@@ -7,19 +7,25 @@ import pytest
 from gptimage.config import (
     FALLBACK_COST,
     MAX_LONG_EDGE,
+    MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_IMAGES,
     MAX_SHORT_EDGE,
     MIN_PIXELS,
     MODEL_PRICING,
+    MODELS_WITHOUT_INPUT_FIDELITY,
     MODELS_WITHOUT_TRANSPARENCY,
     VALID_ASPECT_RATIOS,
+    VALID_INPUT_FIDELITY,
     VALID_MODELS,
     VALID_QUALITIES,
     aspect_res_to_size,
     estimate_cost,
     is_retryable_error,
     validate_background_for_model,
+    validate_input_fidelity_for_model,
     validate_model,
     validate_quality,
+    validate_reference_paths,
 )
 
 
@@ -180,3 +186,79 @@ class TestOutputStreamDiscipline:
         from gptimage.generator import console
 
         assert console.stderr is True, "generator console must write to stderr"
+
+
+class TestInputFidelityGuard:
+    """gpt-image-2 answers 400 for input_fidelity; older models accept it."""
+
+    @pytest.mark.parametrize("value", ["high", "low"])
+    def test_gpt_image_2_rejects_it(self, value: str) -> None:
+        with pytest.raises(ValueError, match="does not support input_fidelity"):
+            validate_input_fidelity_for_model(value, "gpt-image-2")
+
+    def test_error_explains_the_alternative(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            validate_input_fidelity_for_model("high", "gpt-image-2")
+        message = str(exc.value)
+        assert "high fidelity" in message, "should explain why the knob is redundant there"
+        assert "gpt-image-1.5" in message, "should name a model that accepts it"
+
+    @pytest.mark.parametrize("model", sorted(VALID_MODELS - MODELS_WITHOUT_INPUT_FIDELITY))
+    @pytest.mark.parametrize("value", ["high", "low"])
+    def test_older_models_accept_it(self, model: str, value: str) -> None:
+        validate_input_fidelity_for_model(value, model)
+
+    def test_none_is_always_fine(self) -> None:
+        for model in VALID_MODELS:
+            validate_input_fidelity_for_model(None, model)
+
+    def test_rejects_unknown_value(self) -> None:
+        with pytest.raises(ValueError, match="Invalid input fidelity"):
+            validate_input_fidelity_for_model("medium", "gpt-image-1.5")
+
+    def test_valid_values_are_exactly_high_and_low(self) -> None:
+        assert VALID_INPUT_FIDELITY == {"high", "low"}
+
+
+class TestReferenceLimits:
+    """The edit endpoint takes up to 16 references, each under 50 MB."""
+
+    def _make(self, tmp_path, count: int) -> list:
+        paths = []
+        for i in range(count):
+            p = tmp_path / f"ref{i}.png"
+            p.write_bytes(b"fake")
+            paths.append(p)
+        return paths
+
+    def test_documented_maximum_is_sixteen(self) -> None:
+        assert MAX_REFERENCE_IMAGES == 16
+
+    def test_accepts_up_to_the_maximum(self, tmp_path) -> None:
+        refs = self._make(tmp_path, MAX_REFERENCE_IMAGES)
+        assert validate_reference_paths(refs) == refs
+
+    def test_rejects_one_over_the_maximum(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="Too many reference images"):
+            validate_reference_paths(self._make(tmp_path, MAX_REFERENCE_IMAGES + 1))
+
+    def test_accepts_the_two_image_compositing_case(self, tmp_path) -> None:
+        # product + target scene — the reason multi-reference exists
+        refs = self._make(tmp_path, 2)
+        assert len(validate_reference_paths(refs)) == 2
+
+    def test_empty_list_is_fine(self) -> None:
+        assert validate_reference_paths([]) == []
+
+    def test_rejects_oversized_file(self, tmp_path) -> None:
+        # Sparse file: reports >50 MB via stat() without actually occupying the disk.
+        big = tmp_path / "big.png"
+        with open(big, "wb") as f:
+            f.truncate(MAX_REFERENCE_BYTES + 1)
+
+        with pytest.raises(ValueError, match="too large"):
+            validate_reference_paths([big])
+
+    def test_still_validates_each_path(self, tmp_path) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            validate_reference_paths([tmp_path / "nope.png"])

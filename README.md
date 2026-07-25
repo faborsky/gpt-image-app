@@ -22,6 +22,7 @@ Ships with a **[Claude Code skill](skill/INSTALL.md)** so your agent knows the p
 - [Commands](#commands)
 - [Models](#models)
 - [Pricing](#pricing)
+- [Reference images and compositing](#reference-images-and-compositing)
 - [Transparency](#transparency)
 - [Batch job format](#batch-job-format)
 - [JSON output](#json-output)
@@ -92,7 +93,8 @@ Verify the install without spending anything:
 | `-f`, `--format` | `png` | `png`, `webp`, `jpeg` |
 | `-o`, `--output` | `./output` | Output directory |
 | `-n`, `--name` | derived from prompt | Custom filename, no extension |
-| `-ref`, `--reference` | — | Reference image (uses the edit endpoint) |
+| `-ref`, `--reference` | — | Reference image; **repeat for several** (max 16) |
+| `-if`, `--input-fidelity` | — | `high` / `low` — detail preserved from references (not on `gpt-image-2`) |
 | `--json` | off | Machine-readable result on stdout |
 
 ```bash
@@ -107,6 +109,9 @@ Verify the install without spending anything:
 
 # Edit an existing image
 ./run.sh generate "Replace the background with a seamless deep navy studio backdrop. Keep the product, its label and the lighting exactly the same." -ref product.png
+
+# Composite: put a product into a target scene (two references)
+./run.sh generate "Place the product from the first image onto the table from the second image. Keep its shape and colour exactly as they are. Match the scene's lighting and add a soft contact shadow." -ref product.png -ref scene.png
 ```
 
 Filenames are `gpt_<base>_<ratio>_<resolution>_<timestamp>.<ext>`. The `gpt_` prefix keeps outputs identifiable when several image tools write into the same folder.
@@ -177,6 +182,48 @@ Token rates per 1M tokens:
 **Quality is the dominant cost lever — `high` is roughly 35× `low`.** Iterate on `low`, then render the winner on `high`. Bigger non-square sizes can cost slightly *less* than square ones, because output tokens track shape as well as area.
 
 `describe` runs on `gpt-5.4-mini` ($0.75/1M in, $4.50/1M out) — a fraction of a cent per image.
+
+---
+
+## Reference images and compositing
+
+Pass a reference to edit rather than generate from scratch. **Repeat `-ref` to pass several** — up to **16**, the documented endpoint maximum, each png/webp/jpg under 50 MB.
+
+Several references is what makes compositing expressible. The canonical case is *product + target scene*:
+
+```bash
+./run.sh generate "Place the product from the first image onto the wooden table from the second image. \
+  Keep its shape and colour exactly as they are. Match the scene's morning lighting and add a soft contact shadow." \
+  -ref product.png -ref scene.png
+```
+
+Refer to the inputs by position ("the first image", "the second image") and say explicitly what must stay unchanged.
+
+In batch jobs, either shape works:
+
+```json
+{ "prompt": "...", "reference_path": "single.png" }
+{ "prompt": "...", "reference_paths": ["product.png", "scene.png"] }
+```
+
+### References cost real money
+
+Reference images are billed as **input image tokens**, so a composite is far from free. Measured on the same 1024×1024 `low` run:
+
+| Call | Input tokens | Cost |
+|---|---|---|
+| text only | 24 | $0.0063 |
+| two references | 2365 | **$0.025** |
+
+Budget accordingly: a 20-image composite batch is nearer $0.50 than $0.13, and that is at `low`.
+
+### input_fidelity
+
+`-if high` / `-if low` controls how strongly reference detail is preserved — but only on `gpt-image-1`, `gpt-image-1.5` and `gpt-image-1-mini`. **`gpt-image-2` rejects it** (`400`), because it always processes inputs at high fidelity; the CLI catches that locally and says so.
+
+It is also a cost lever on the models that take it: `high` used **4791** tokens against **618** for `low` on the same edit.
+
+**A caveat worth knowing:** in a two-reference composite on `gpt-image-2`, an explicit instruction to preserve fine surface detail ("keep the ripeness spots exactly as they are") was not honoured — shape and colour survived, the fine markings did not. Since fidelity cannot be raised on that model, edits that hinge on preserving fine detail may do better on `gpt-image-1.5` with `-if high`.
 
 ---
 

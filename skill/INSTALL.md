@@ -63,7 +63,8 @@ Claude si doptá, co potřebuje, u dražších věcí řekne **kolik to bude st�
 
 - **Jeden obrázek** z textového promptu — poměr stran, rozlišení, kvalita, model, formát.
 - **Dávku obrázků** z JSON souboru, včetně bezplatné kontroly (`validate`) předtím, než se cokoli zaplatí.
-- **Úpravu existujícího obrázku** — výměna pozadí, stylová transformace, kompozice.
+- **Úpravu existujícího obrázku** — výměna pozadí, stylová transformace.
+- **Kompozici z víc referencí** (až 16) — třeba produkt z jedné fotky do scény z druhé.
 - **Analýzu obrázku** (`describe`) — vytáhne z obrázku prompt, který můžeš použít dál.
 - **Hlídá ceny** — cenu bere z reálné odpovědi API, ne z odhadu, a doporučí ti levný draft před drahým finálem.
 - **Zná pravidla promptování** — pořadí `scéna → subjekt → detaily → omezení`, tabulku DO/DON'T a hlavní lekci: *měň jednu věc po druhé*.
@@ -71,9 +72,19 @@ Claude si doptá, co potřebuje, u dražších věcí řekne **kolik to bude st�
 
 ## Tři věci, které ti ušetří peníze
 
-1. **Kvalita je ta drahá páka, ne rozlišení.** `high` stojí přibližně **35× víc než `low`** ($0,211 vs $0,006 za kus). Iteruj na `low`, finál dej na `high`.
+1. **Kvalita je ta drahá páka, ne rozlišení.** Podle ceníku je `high` ~35× dražší než `low` ($0,211 vs $0,006); na reálném editu s referencí to vyšlo ~17×. Tak či tak: iteruj na `low`, finál dej na `high`.
 2. **`gpt-image-1-mini` je výrazně levnější** — na návrhy a velké objemy je to rozumná volba.
 3. **U dávky vždycky nejdřív `validate`.** Je zdarma a offline.
+
+## Reference se účtují — pozor na rozpočet
+
+Referenční obrázky se účtují jako **vstupní tokeny**, takže kompozice je výrazně dražší
+než generování z textu. Naměřeno na stejném obrázku: bez referencí **$0,0063**, se dvěma
+referencemi **$0,025** — tedy ~4×. Proto skill u dávek nejdřív vygeneruje jeden kus,
+přečte reálnou cenu a teprve pak spočítá rozpočet.
+
+Druhá věc: **ceníková tabulka je spodní odhad.** Platí pro 1024×1024 bez reference.
+S referencí a 2K výstupem jde cena 2–4× nahoru.
 
 ## Průhledné pozadí — pozor
 

@@ -55,6 +55,17 @@ VALID_MODELS: set[str] = set(MODEL_PRICING.keys())
 # currently support transparent backgrounds." The older models still accept it.
 MODELS_WITHOUT_TRANSPARENCY: frozenset[str] = frozenset({"gpt-image-2"})
 
+# gpt-image-2 rejects input_fidelity with a 400: "The model 'gpt-image-2' does not
+# support the 'input_fidelity' parameter." Per the docs it processes every image
+# input at high fidelity automatically, so the knob only exists on older models.
+# Verified live 2026-07-25.
+MODELS_WITHOUT_INPUT_FIDELITY: frozenset[str] = frozenset({"gpt-image-2"})
+
+# The edit endpoint accepts up to 16 reference images for GPT Image models, each a
+# png/webp/jpg under 50 MB. Source: OpenAI API reference (images/edit).
+MAX_REFERENCE_IMAGES = 16
+MAX_REFERENCE_BYTES = 50 * 1024 * 1024
+
 # HTTP status codes worth retrying: 429 = rate limit, 5xx = transient server-side
 # failures (OpenAI's image endpoint does return sporadic 500s). Everything else —
 # 400 invalid request, 401 bad key, 403, 404 unknown model — fails identically on
@@ -133,11 +144,19 @@ class OutputFormat(StrEnum):
     JPEG = "jpeg"
 
 
+class InputFidelity(StrEnum):
+    """How strongly the model preserves detail from reference images (older models only)."""
+
+    HIGH = "high"
+    LOW = "low"
+
+
 VALID_ASPECT_RATIOS: set[str] = {r.value for r in AspectRatio}
 VALID_RESOLUTIONS: set[str] = {r.value for r in Resolution}
 VALID_QUALITIES: set[str] = {q.value for q in Quality}
 VALID_BACKGROUNDS: set[str] = {b.value for b in Background}
 VALID_OUTPUT_FORMATS: set[str] = {f.value for f in OutputFormat}
+VALID_INPUT_FIDELITY: set[str] = {f.value for f in InputFidelity}
 
 # Supported image formats for reference images
 SUPPORTED_IMAGE_FORMATS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -275,6 +294,80 @@ def validate_reference_path(reference_path: Path) -> Path:
         valid = ", ".join(sorted(SUPPORTED_IMAGE_FORMATS))
         raise ValueError(f"Unsupported image format '{suffix}'. Supported formats: {valid}")
     return reference_path
+
+
+def validate_input_fidelity(input_fidelity: str) -> str:
+    """Validate an input_fidelity value."""
+    if input_fidelity not in VALID_INPUT_FIDELITY:
+        valid = ", ".join(sorted(VALID_INPUT_FIDELITY))
+        raise ValueError(f"Invalid input fidelity '{input_fidelity}'. Valid options: {valid}")
+    return input_fidelity
+
+
+def validate_input_fidelity_for_model(input_fidelity: str | None, model: str) -> None:
+    """
+    Check that this model accepts input_fidelity at all.
+
+    `gpt-image-2` answers a 400 ("The model 'gpt-image-2' does not support the
+    'input_fidelity' parameter") because it always processes inputs at high fidelity.
+    Catching it locally saves a round-trip and explains what to do instead.
+
+    Args:
+        input_fidelity: The requested value, or None when not set.
+        model: The target model.
+
+    Raises:
+        ValueError: If the model cannot accept the parameter.
+    """
+    if input_fidelity is None:
+        return
+
+    validate_input_fidelity(input_fidelity)
+
+    if model in MODELS_WITHOUT_INPUT_FIDELITY:
+        alternatives = ", ".join(sorted(VALID_MODELS - MODELS_WITHOUT_INPUT_FIDELITY))
+        raise ValueError(
+            f"{model} does not support input_fidelity — it always processes reference "
+            f"images at high fidelity, so the parameter is redundant there. Either drop "
+            f"the flag, or use a model that accepts it ({alternatives}) via --model."
+        )
+
+
+def validate_reference_paths(reference_paths: list[Path]) -> list[Path]:
+    """
+    Validate a list of reference images for the edit endpoint.
+
+    The endpoint accepts up to MAX_REFERENCE_IMAGES files, each png/webp/jpg under
+    50 MB. Checking the count and size locally matters more here than elsewhere:
+    reference images are billed as input image tokens, so a rejected oversized batch
+    would still have cost upload time, and an over-limit request wastes a paid call.
+
+    Args:
+        reference_paths: Paths to validate.
+
+    Returns:
+        The validated list.
+
+    Raises:
+        ValueError: If the list is too long, or any file is missing/unsupported/oversized.
+    """
+    if len(reference_paths) > MAX_REFERENCE_IMAGES:
+        raise ValueError(
+            f"Too many reference images: {len(reference_paths)}. "
+            f"The edit endpoint accepts at most {MAX_REFERENCE_IMAGES}."
+        )
+
+    for path in reference_paths:
+        validate_reference_path(path)
+        size = path.stat().st_size
+        if size > MAX_REFERENCE_BYTES:
+            raise ValueError(
+                f"Reference image too large: {path} is "
+                f"{size / 1024 / 1024:.1f} MB, the limit is "
+                f"{MAX_REFERENCE_BYTES // 1024 // 1024} MB."
+            )
+
+    return reference_paths
 
 
 def validate_background_for_model(background: str, model: str, output_format: str) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import random
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,10 +27,11 @@ from gptimage.config import (
     validate_aspect_ratio,
     validate_background,
     validate_background_for_model,
+    validate_input_fidelity_for_model,
     validate_model,
     validate_output_format,
     validate_quality,
-    validate_reference_path,
+    validate_reference_paths,
     validate_resolution,
 )
 from gptimage.utils import get_output_path
@@ -54,6 +56,8 @@ class GenerationResult:
     cost_source: str | None = None
     size: str | None = None
     attempts: int = 0
+    reference_count: int = 0
+    input_fidelity: str | None = None
 
 
 class ImageGenerationError(Exception):
@@ -97,12 +101,21 @@ class ImageGenerator:
         resolution: str,
         output_dir: Path,
         custom_name: str | None = None,
-        reference_path: Path | None = None,
+        reference_paths: list[Path] | None = None,
         output_format: str = DEFAULT_OUTPUT_FORMAT,
         quality: str = DEFAULT_QUALITY,
         background: str = DEFAULT_BACKGROUND,
+        input_fidelity: str | None = None,
     ) -> GenerationResult:
-        """Generate a single image, optionally guided by a reference image."""
+        """
+        Generate a single image, optionally guided by one or more reference images.
+
+        Passing several references is how compositing works — e.g. one image of a
+        product plus one of the target scene. They are billed as input image tokens,
+        so more references means a higher cost per call.
+        """
+        references = list(reference_paths or [])
+
         # Validate parameters
         try:
             validate_aspect_ratio(aspect_ratio)
@@ -110,16 +123,26 @@ class ImageGenerator:
             validate_output_format(output_format)
             validate_quality(quality)
             validate_background(background)
-            if reference_path:
-                validate_reference_path(reference_path)
+            if references:
+                validate_reference_paths(references)
         except ValueError as e:
             return GenerationResult(success=False, error_message=str(e))
 
-        # Catch impossible background/model/format combinations before spending a call.
+        # Catch impossible parameter/model combinations before spending a call.
         try:
             validate_background_for_model(background, self._model, output_format)
+            validate_input_fidelity_for_model(input_fidelity, self._model)
         except ValueError as e:
             return GenerationResult(success=False, error_message=str(e))
+
+        if input_fidelity and not references:
+            return GenerationResult(
+                success=False,
+                error_message=(
+                    "input_fidelity only applies when editing reference images. "
+                    "Pass at least one reference, or drop the flag."
+                ),
+            )
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,12 +156,13 @@ class ImageGenerator:
                     size=size,
                     output_dir=output_dir,
                     custom_name=custom_name,
-                    reference_path=reference_path,
+                    reference_paths=references,
                     output_format=output_format,
                     quality=quality,
                     background=background,
                     aspect_ratio=aspect_ratio,
                     resolution=resolution,
+                    input_fidelity=input_fidelity,
                 )
                 result.attempts = attempt + 1
                 return result
@@ -197,12 +221,13 @@ class ImageGenerator:
         size: str,
         output_dir: Path,
         custom_name: str | None,
-        reference_path: Path | None,
+        reference_paths: list[Path],
         output_format: str,
         quality: str,
         background: str,
         aspect_ratio: str,
         resolution: str,
+        input_fidelity: str | None = None,
     ) -> GenerationResult:
         common: dict = {
             "model": self._model,
@@ -214,9 +239,15 @@ class ImageGenerator:
             "n": 1,
         }
 
-        if reference_path:
-            with open(reference_path, "rb") as ref:
-                response = self._client.images.edit(image=ref, **common)
+        if reference_paths:
+            # The edit endpoint takes a list of file handles — that list is what makes
+            # compositing possible (e.g. product + target scene). ExitStack closes every
+            # handle even if the call raises, which matters because retries reopen them.
+            with ExitStack() as stack:
+                handles = [stack.enter_context(open(path, "rb")) for path in reference_paths]
+                if input_fidelity:
+                    common["input_fidelity"] = input_fidelity
+                response = self._client.images.edit(image=handles, **common)
         else:
             response = self._client.images.generate(**common)
 
@@ -250,4 +281,6 @@ class ImageGenerator:
             cost_usd=cost,
             cost_source=source,
             size=size,
+            reference_count=len(reference_paths),
+            input_fidelity=input_fidelity,
         )

@@ -2,6 +2,61 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-07-25
+
+### Added
+
+- **Multiple reference images.** `-ref` can now be repeated (up to 16, the documented
+  endpoint maximum), and batch jobs accept a list. This is what makes compositing
+  possible — the canonical case being one image of a product plus one of the target
+  scene, which a single reference cannot express.
+
+  ```bash
+  ./run.sh generate "Place the product from the first image onto the table from the \
+    second image. Keep its shape and colour exactly. Match the scene's lighting." \
+    -ref product.png -ref scene.png
+  ```
+
+  In batch files, `reference_path` accepts either a single string (unchanged, so
+  existing job files keep working) or a list; `reference_paths` is the explicit plural.
+
+- **`--input-fidelity` / `-if`** (`high` | `low`) — how strongly the model preserves
+  detail from reference images. Guarded per model: `gpt-image-2` answers a `400`
+  ("The model 'gpt-image-2' does not support the 'input_fidelity' parameter") because
+  it always works at high fidelity, so the CLI rejects that combination locally and
+  names the models that accept it. Also rejected when passed without any reference,
+  where it has no meaning.
+
+- **`reference_count` and `input_fidelity` in the `--json` payload**, so a caller can
+  see how many references a result was built from.
+
+- **Reference validation**: count against the 16-image maximum and size against the
+  50 MB per-file limit, checked locally before a paid call.
+
+- 29 further offline tests, including that a 1.0.x job file with a single
+  `reference_path` string still parses identically.
+
+### Costs to know before using this
+
+Reference images are billed as **input image tokens**, so multi-reference calls are
+markedly more expensive than text-only ones. Measured on the same 1024×1024 `low` run:
+
+| Call | Input tokens | Cost |
+|---|---|---|
+| text only | 24 | $0.0063 |
+| two reference images | 2365 | **$0.025** |
+
+On models that accept it, `input_fidelity` is also a real cost lever — `high` used
+4791 tokens against 618 for `low` on the same edit, roughly 8×.
+
+### Note on fidelity
+
+In a two-reference composite on `gpt-image-2`, an explicit instruction to preserve the
+product's surface detail ("keep the ripeness spots exactly as they are") was not
+followed — the output kept the shape and colour but dropped the fine markings. Since
+`input_fidelity` cannot be raised on that model, an edit that depends on preserving
+fine detail may do better on `gpt-image-1.5` with `--input-fidelity high`.
+
 ## [1.0.1] — 2026-07-25
 
 ### Fixed

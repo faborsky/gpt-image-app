@@ -20,9 +20,12 @@ from gptimage.config import (
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_QUALITY,
     DEFAULT_RESOLUTION,
+    MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_IMAGES,
     SUPPORTED_IMAGE_FORMATS,
     VALID_ASPECT_RATIOS,
     VALID_BACKGROUNDS,
+    VALID_INPUT_FIDELITY,
     VALID_MODELS,
     VALID_OUTPUT_FORMATS,
     VALID_QUALITIES,
@@ -101,16 +104,35 @@ def validate_model_callback(value: str) -> str:
     return _validate_choice(value, VALID_MODELS, "model")
 
 
-def validate_reference_callback(value: Path | None) -> Path | None:
+def validate_input_fidelity_callback(value: str | None) -> str | None:
     if value is None:
         return None
-    if not value.exists():
-        raise typer.BadParameter(f"Reference image not found: {value}")
-    if not value.is_file():
-        raise typer.BadParameter(f"Reference path is not a file: {value}")
-    if value.suffix.lower() not in SUPPORTED_IMAGE_FORMATS:
-        valid = ", ".join(sorted(SUPPORTED_IMAGE_FORMATS))
-        raise typer.BadParameter(f"Unsupported image format. Valid formats: {valid}")
+    return _validate_choice(value, VALID_INPUT_FIDELITY, "input fidelity")
+
+
+def validate_references_callback(value: list[Path] | None) -> list[Path] | None:
+    """Validate every -ref path. Repeat the flag to composite several references."""
+    if not value:
+        return value
+    if len(value) > MAX_REFERENCE_IMAGES:
+        raise typer.BadParameter(
+            f"Too many reference images: {len(value)}. "
+            f"The edit endpoint accepts at most {MAX_REFERENCE_IMAGES}."
+        )
+    for path in value:
+        if not path.exists():
+            raise typer.BadParameter(f"Reference image not found: {path}")
+        if not path.is_file():
+            raise typer.BadParameter(f"Reference path is not a file: {path}")
+        if path.suffix.lower() not in SUPPORTED_IMAGE_FORMATS:
+            valid = ", ".join(sorted(SUPPORTED_IMAGE_FORMATS))
+            raise typer.BadParameter(f"Unsupported image format. Valid formats: {valid}")
+        if path.stat().st_size > MAX_REFERENCE_BYTES:
+            raise typer.BadParameter(
+                f"Reference image too large: {path} is "
+                f"{path.stat().st_size / 1024 / 1024:.1f} MB, limit is "
+                f"{MAX_REFERENCE_BYTES // 1024 // 1024} MB."
+            )
     return value
 
 
@@ -157,9 +179,22 @@ def generate(
                      callback=validate_format_callback),
     ] = DEFAULT_OUTPUT_FORMAT,
     reference: Annotated[
-        Path | None,
-        typer.Option("--reference", "-ref", help="Reference image for edit/style guidance",
-                     callback=validate_reference_callback),
+        list[Path] | None,
+        typer.Option(
+            "--reference", "-ref",
+            help="Reference image; repeat the flag for several "
+                 f"(e.g. product + target scene). Max {MAX_REFERENCE_IMAGES}.",
+            callback=validate_references_callback,
+        ),
+    ] = None,
+    input_fidelity: Annotated[
+        str | None,
+        typer.Option(
+            "--input-fidelity", "-if",
+            help="How strongly to preserve reference detail: high | low. "
+                 "Not supported by gpt-image-2, which is always high.",
+            callback=validate_input_fidelity_callback,
+        ),
     ] = None,
     json_output: Annotated[
         bool,
@@ -185,7 +220,9 @@ def generate(
     out.print(f"  Aspect / resolution: {aspect} @ {resolution}  ->  {size} px")
     out.print(f"  Quality: {quality}   Format: {format.upper()}   Background: {background}")
     if reference:
-        out.print(f"  Reference: {reference}")
+        out.print(f"  References ({len(reference)}): {', '.join(str(p) for p in reference)}")
+        if input_fidelity:
+            out.print(f"  Input fidelity: {input_fidelity}")
 
     result = generator.generate(
         prompt=prompt,
@@ -193,10 +230,11 @@ def generate(
         resolution=resolution,
         output_dir=output,
         custom_name=name,
-        reference_path=reference,
+        reference_paths=reference,
         output_format=format,
         quality=quality,
         background=background,
+        input_fidelity=input_fidelity,
     )
 
     if result.success:
@@ -215,6 +253,8 @@ def generate(
                     "cost_usd": round(result.cost_usd, 4) if result.cost_usd is not None else None,
                     "cost_source": result.cost_source,
                     "attempts": result.attempts,
+                    "reference_count": result.reference_count,
+                    "input_fidelity": result.input_fidelity,
                 }
             )
         else:

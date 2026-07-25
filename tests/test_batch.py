@@ -145,3 +145,88 @@ class TestFilenames:
         assert generate_filename("long prompt", "1:1", "1K", custom_name="hero").startswith(
             "gpt_hero_"
         )
+
+
+class TestMultiReferenceJobs:
+    """reference_path stays backward compatible; lists enable compositing."""
+
+    def test_single_string_still_works(self, tmp_path: Path) -> None:
+        # Job files written for 1.0.x must keep parsing unchanged.
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"fake")
+        job_file = write_job(tmp_path, {"jobs": [{"prompt": "x", "reference_path": str(ref)}]})
+        assert validate_job_file(job_file) == []
+        assert parse_job_file(job_file).jobs[0].reference_paths == [ref]
+
+    def test_list_under_reference_path(self, tmp_path: Path) -> None:
+        refs = []
+        for name in ("product.png", "scene.png"):
+            p = tmp_path / name
+            p.write_bytes(b"fake")
+            refs.append(p)
+        job_file = write_job(
+            tmp_path, {"jobs": [{"prompt": "x", "reference_path": [str(r) for r in refs]}]}
+        )
+        assert validate_job_file(job_file) == []
+        assert parse_job_file(job_file).jobs[0].reference_paths == refs
+
+    def test_plural_key_works_too(self, tmp_path: Path) -> None:
+        refs = []
+        for name in ("a.png", "b.png"):
+            p = tmp_path / name
+            p.write_bytes(b"fake")
+            refs.append(p)
+        job_file = write_job(
+            tmp_path, {"jobs": [{"prompt": "x", "reference_paths": [str(r) for r in refs]}]}
+        )
+        assert validate_job_file(job_file) == []
+        assert parse_job_file(job_file).jobs[0].reference_paths == refs
+
+    def test_no_reference_gives_empty_list(self, tmp_path: Path) -> None:
+        job = parse_job_file(write_job(tmp_path, {"jobs": [{"prompt": "x"}]})).jobs[0]
+        assert job.reference_paths == []
+
+    def test_rejects_over_the_limit(self, tmp_path: Path) -> None:
+        refs = []
+        for i in range(17):
+            p = tmp_path / f"r{i}.png"
+            p.write_bytes(b"fake")
+            refs.append(str(p))
+        job_file = write_job(tmp_path, {"jobs": [{"prompt": "x", "reference_paths": refs}]})
+        assert any("too many reference images" in e for e in validate_job_file(job_file))
+
+    def test_rejects_non_string_list_items(self, tmp_path: Path) -> None:
+        job_file = write_job(tmp_path, {"jobs": [{"prompt": "x", "reference_paths": [1, 2]}]})
+        assert any("must contain strings" in e for e in validate_job_file(job_file))
+
+    def test_reports_a_missing_file_inside_a_list(self, tmp_path: Path) -> None:
+        good = tmp_path / "good.png"
+        good.write_bytes(b"fake")
+        job_file = write_job(
+            tmp_path,
+            {"jobs": [{"prompt": "x", "reference_paths": [str(good), str(tmp_path / "no.png")]}]},
+        )
+        assert any("reference image not found" in e for e in validate_job_file(job_file))
+
+
+class TestInputFidelityJobs:
+    def test_accepted_per_job_and_from_defaults(self, tmp_path: Path) -> None:
+        job_file = write_job(
+            tmp_path,
+            {
+                "defaults": {"input_fidelity": "low"},
+                "jobs": [{"prompt": "a"}, {"prompt": "b", "input_fidelity": "high"}],
+            },
+        )
+        assert validate_job_file(job_file) == []
+        jobs = parse_job_file(job_file).jobs
+        assert jobs[0].input_fidelity == "low"
+        assert jobs[1].input_fidelity == "high"
+
+    def test_defaults_to_none(self, tmp_path: Path) -> None:
+        job = parse_job_file(write_job(tmp_path, {"jobs": [{"prompt": "x"}]})).jobs[0]
+        assert job.input_fidelity is None
+
+    def test_rejects_invalid_value(self, tmp_path: Path) -> None:
+        job_file = write_job(tmp_path, {"jobs": [{"prompt": "x", "input_fidelity": "medium"}]})
+        assert any("input_fidelity" in e for e in validate_job_file(job_file))
