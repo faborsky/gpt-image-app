@@ -34,7 +34,9 @@ from gptimage.config import (
 )
 from gptimage.utils import get_output_path
 
-console = Console()
+# Retry notices are progress diagnostics, not results — they always belong on
+# stderr, so that `--json` keeps stdout a clean, parseable payload.
+console = Console(stderr=True)
 
 # Sizes the non-flagship models accept (gpt-image-1 / 1.5 / mini): only these
 # three plus "auto". gpt-image-2 accepts arbitrary WxH.
