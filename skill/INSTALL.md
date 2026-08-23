@@ -68,7 +68,7 @@ Claude si doptá, co potřebuje, u dražších věcí řekne **kolik to bude st�
 - **Analýzu obrázku** (`describe`) — vytáhne z obrázku prompt, který můžeš použít dál.
 - **Hlídá ceny** — cenu bere z reálné odpovědi API, ne z odhadu, a doporučí ti levný draft před drahým finálem.
 - **Zná pravidla promptování** — pořadí `scéna → subjekt → detaily → omezení`, tabulku DO/DON'T a hlavní lekci: *měň jednu věc po druhé*.
-- **Zná limity modelů** — hlavně že `gpt-image-2` neumí průhledné pozadí a že drobný text se pořád láme.
+- **Zná limity modelů** — že průhledné pozadí je na `gpt-image-2` zatím v preview (a v JPEG nejde nikde) a že drobný text se pořád láme.
 
 ## Tři věci, které ti ušetří peníze
 

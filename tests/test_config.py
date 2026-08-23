@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from gptimage import config
 from gptimage.config import (
     FALLBACK_COST,
     MAX_LONG_EDGE,
@@ -111,25 +112,32 @@ class TestPricing:
 
 
 class TestTransparencyGuard:
-    """gpt-image-2 rejects background=transparent; catch it before spending a call."""
+    """Transparency needs a model that supports it and a container that has alpha."""
 
-    def test_gpt_image_2_rejects_transparent(self) -> None:
-        with pytest.raises(ValueError, match="does not support transparent"):
-            validate_background_for_model("transparent", "gpt-image-2", "png")
+    def test_gpt_image_2_supports_transparency(self) -> None:
+        # Shipped in preview on 2026-08-20 and verified live on 2026-08-23. Until then
+        # the CLI rejected it locally; this test guards against that guard coming back.
+        assert "gpt-image-2" not in MODELS_WITHOUT_TRANSPARENCY
+        validate_background_for_model("transparent", "gpt-image-2", "png")
 
-    def test_error_names_a_model_that_does_support_it(self) -> None:
-        with pytest.raises(ValueError) as exc:
-            validate_background_for_model("transparent", "gpt-image-2", "png")
-        assert "gpt-image-1.5" in str(exc.value)
+    @pytest.mark.parametrize("output_format", ["png", "webp"])
+    @pytest.mark.parametrize("model", sorted(VALID_MODELS))
+    def test_alpha_containers_are_allowed_everywhere(self, model: str, output_format: str) -> None:
+        validate_background_for_model("transparent", model, output_format)
 
-    @pytest.mark.parametrize("model", sorted(VALID_MODELS - MODELS_WITHOUT_TRANSPARENCY))
-    def test_older_models_allow_transparent_png(self, model: str) -> None:
-        validate_background_for_model("transparent", model, "png")
-
-    @pytest.mark.parametrize("model", sorted(VALID_MODELS - MODELS_WITHOUT_TRANSPARENCY))
+    @pytest.mark.parametrize("model", sorted(VALID_MODELS))
     def test_jpeg_cannot_carry_transparency(self, model: str) -> None:
         with pytest.raises(ValueError, match="png or webp"):
             validate_background_for_model("transparent", model, "jpeg")
+
+    def test_the_guard_still_fires_for_a_model_without_support(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The check is data-driven: if a future model drops transparency, listing its ID
+        # in MODELS_WITHOUT_TRANSPARENCY is all it takes to catch it before paying.
+        monkeypatch.setattr(config, "MODELS_WITHOUT_TRANSPARENCY", frozenset({"gpt-image-2"}))
+        with pytest.raises(ValueError, match="does not support transparent"):
+            validate_background_for_model("transparent", "gpt-image-2", "png")
 
     @pytest.mark.parametrize("background", ["auto", "opaque"])
     def test_non_transparent_backgrounds_are_always_fine(self, background: str) -> None:

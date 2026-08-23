@@ -12,7 +12,7 @@ Ships with a **[Claude Code skill](skill/INSTALL.md)** so your agent knows the p
 - **Aspect-ratio vocabulary** (`-a 16:9 -r 2K`) instead of raw pixel sizes, mapped to whatever each model accepts.
 - **Machine-readable `--json`** on stdout, human output on stderr.
 - **Retries only what's worth retrying** — rate limits and the 500s this endpoint really does return, with exponential backoff and jitter.
-- **Impossible parameter combinations are caught before you pay** — for example transparency on a model that doesn't support it.
+- **Impossible parameter combinations are caught before you pay** — for example transparency in a JPEG, which has no alpha channel.
 
 ---
 
@@ -147,7 +147,7 @@ Analyses an image with `gpt-5.4-mini` and returns text you can feed back into `g
 
 | Model | Sizes | Transparency | Notes |
 |---|---|---|---|
-| **`gpt-image-2`** (default) | any WxH within limits | **no** | Flagship. Best quality and editing. |
+| **`gpt-image-2`** (default) | any WxH within limits | yes (preview, since 2026-08-20) | Flagship. Best quality and editing. |
 | `gpt-image-1.5` | 3 fixed sizes | yes | Previous flagship. |
 | `gpt-image-1-mini` | 3 fixed sizes | yes | Cheapest — good for drafts and volume. |
 | `gpt-image-1` | 3 fixed sizes | yes | Legacy. |
@@ -229,18 +229,24 @@ It is also a cost lever on the models that take it: `high` used **4791** tokens 
 
 ## Transparency
 
-**`gpt-image-2` does not support transparent backgrounds.** Requests with `background: transparent` are rejected by the API with a `400`:
+**Every current model supports transparent backgrounds**, including `gpt-image-2` — transparency shipped for it **in preview on 2026-08-20** ([changelog](https://developers.openai.com/api/docs/changelog)). Until then it was the one thing the flagship couldn't do; that limitation is gone.
+
+```bash
+# Cut-out asset you can drop onto any background
+./run.sh generate "A single glossy red apple, centered, studio product shot, no shadow" -b transparent -f png
+```
+
+**Transparency needs a container with an alpha channel**, so `-f png` or `-f webp` only. `-f jpeg` is rejected — locally, before any call is made:
 
 ```
-Transparent background is not supported for this model.
+Transparent background requires png or webp output (jpeg has no alpha channel).
 ```
 
-The CLI catches this *before* making the call and tells you the two ways forward:
+Sending it anyway would earn a `400 invalid_transparent_background_output_format`.
 
-1. Use a model that supports it: `-m gpt-image-1.5` (or `-1-mini`, `-1`) with `-f png` or `-f webp`.
-2. Generate on a flat, uniform background and remove it afterwards in an image editor.
+**Verified live on 2026-08-23** on `gpt-image-2`: PNG and WebP both come back as genuine RGBA with fully transparent pixels (alpha 0 in the corners, opaque subject), on `generate` and on `-ref` edits alike. Because `gpt-image-2` also takes arbitrary sizes, you can now have transparency *and* a non-standard size in one call — e.g. 1072×1072 or 16:9 at 2K — which the older models can't do.
 
-Transparency also requires an alpha-capable container, so `-f jpeg` is rejected regardless of model.
+Preview status is worth remembering for automation: the behaviour can still change, and the CLI's guard is data-driven (`MODELS_WITHOUT_TRANSPARENCY` in `config.py`) if a model ever loses support.
 
 ---
 
@@ -343,7 +349,7 @@ For edits that must preserve a likeness, state exclusions and invariants explici
 ### Known weaknesses
 
 - Precise text placement and clarity, especially small or dense text.
-- No transparency on `gpt-image-2` (see [Transparency](#transparency)).
+- Transparency on `gpt-image-2` is still a **preview** feature (see [Transparency](#transparency)).
 - Content moderation can refuse a prompt; the `moderation` parameter (`auto`/`low`) is not currently exposed by this CLI.
 
 ---
@@ -357,7 +363,7 @@ How this CLI behaves:
 - **429 and 5xx** → retried up to 3 times with exponential backoff **plus jitter**, capped at 60 s. OpenAI explicitly recommends jitter, and the image endpoint genuinely does return sporadic 500s — during development of this release it returned 500 for every model for a sustained period.
 - **400 / 401 / 403 / 404** → failed immediately. Retrying an invalid request or a bad key wastes time and quota.
 - **Moderation refusals** → reported as `Content filtered`, never retried.
-- **Impossible parameter combinations** (transparency on `gpt-image-2`, transparent JPEG) → rejected locally, before any call is made.
+- **Impossible parameter combinations** (transparent JPEG, `input_fidelity` on `gpt-image-2`) → rejected locally, before any call is made.
 - **Batch** waits `--delay` seconds between images. Raise it if you hit IPM limits.
 
 ---
@@ -398,7 +404,7 @@ See **[CLAUDE.md](CLAUDE.md)** for the architecture notes an AI agent needs, and
 
 **`Missing API key`** — copy `.env.example` to `.env` and paste your key.
 
-**`does not support transparent backgrounds`** — see [Transparency](#transparency).
+**`Transparent background requires png or webp output`** — `-b transparent` with `-f jpeg`. Switch the format; see [Transparency](#transparency).
 
 **`below the current minimum pixel budget`** — a size under ~1 MP reached the API. The `-a`/`-r` mapping prevents this; if you see it, the size came from somewhere else.
 

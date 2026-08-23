@@ -24,6 +24,7 @@ dist/
 # Output
 output/
 generated_images/
+runs/
 
 # OS
 .DS_Store

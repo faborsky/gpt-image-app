@@ -83,7 +83,7 @@ Words like *good, usable, publishable, ad-grade* belong to the user. When compar
 
 | Parameter | Default | When to change |
 |---|---|---|
-| Model | `gpt-image-2` | `gpt-image-1-mini` for cheap volume; `gpt-image-1.5` for transparency or forced input fidelity |
+| Model | `gpt-image-2` | `gpt-image-1-mini` for cheap volume; `gpt-image-1.5` for forced input fidelity |
 | Quality | `high` | **`low` for drafts** |
 | Resolution | `1K` | `2K`/`4K` for print or large display |
 | Aspect | `1:1` | match the destination: `16:9` covers, `9:16` stories, `4:5` posters |
@@ -129,8 +129,7 @@ Token rates per 1M: `gpt-image-2` $8 in / $30 out, `gpt-image-1.5` $8/$32, `gpt-
 
 - **🔴 Placing a product into a NEW scene so that it sits physically right.** The hardest measured limit. Typical failures: a motorbike with no kickstand deployed, an object "pasted into" space and intersecting the scene geometry, a mug balanced on a laptop edge, a deformed product in flat-lay. It fails **systematically, not randomly** — more attempts don't help. Say so rather than burning budget.
 - **Large run-to-run variance** on complex edits: the same prompt gives different results. Never build a claim on one sample.
-- **No transparent background on `gpt-image-2`** — the API rejects it. Use `-m gpt-image-1.5` with `-f png`/`-f webp`, or generate on a flat background and remove it later. The CLI catches this **before** you pay.
-- **Transparency in JPEG** is impossible anywhere (no alpha channel).
+- **Transparency in JPEG** is impossible anywhere (no alpha channel) — `-b transparent` needs `-f png` or `-f webp`. The CLI catches this **before** you pay.
 - **Precise text placement and clarity** — the docs concede this. Short text, simple layout, `medium`/`high` (`low` shreds small text).
 - **Sizes below ~1 MP** are rejected by `gpt-image-2`; the `-a`/`-r` mapping already avoids that.
 - Exact logos, specific real people, and data-accurate charts are unreliable and often refused.
@@ -142,7 +141,7 @@ Token rates per 1M: `gpt-image-2` $8 in / $30 out, `gpt-image-1.5` $8/$32, `gpt-
 **Resolution:** `1K`, `2K`, `4K` (mapped to concrete pixels)
 **Quality:** `low`, `medium`, `high`, `auto`
 **Model:** `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1-mini`, `gpt-image-1`
-**Background:** `auto`, `transparent` (not on `gpt-image-2`), `opaque`
+**Background:** `auto`, `transparent` (all models since 2026-08-20; needs `-f png`/`-f webp`), `opaque`
 **Format:** `png`, `webp`, `jpeg`
 **Reference:** `.jpg`, `.jpeg`, `.png`, `.webp` — `-ref` can be **repeated, up to 16×**
 **Input fidelity:** `-if high` / `-if low` — only on `gpt-image-1/1.5/mini`
@@ -231,8 +230,8 @@ $APP/run.sh generate "<prompt>" -a 16:9 -r 1K -q high -o ./generated_images --js
 # Cheap draft
 $APP/run.sh generate "<prompt>" -q low -o ./generated_images --json
 
-# Transparent background (needs a model that supports it)
-$APP/run.sh generate "<prompt>" -m gpt-image-1.5 -b transparent -f png -o ./generated_images --json
+# Transparent background — works on the default model, png/webp only
+$APP/run.sh generate "<prompt>" -b transparent -f png -o ./generated_images --json
 
 # Edit a reference
 $APP/run.sh generate "<what changes> Keep everything else identical." -ref img.png -o ./generated_images --json
@@ -281,7 +280,7 @@ $APP/run.sh describe img.png --detailed
 | Error | Meaning | What to do |
 |---|---|---|
 | `Missing API key` | no `OPENAI_API_KEY` in `.env` | tell the user to add it |
-| `does not support transparent backgrounds` | transparency on `gpt-image-2` | `-m gpt-image-1.5`, or flatten and remove later |
+| `Transparent background requires png or webp` | `-b transparent` with `-f jpeg` | switch to `-f png` or `-f webp` |
 | `does not support input_fidelity` | `-if` on `gpt-image-2` | drop `-if`, or `-m gpt-image-1.5` |
 | `Too many reference images` | more than 16 references | trim — 16 is the endpoint limit |
 | `Content filtered` | moderation refused | rephrase; retrying identical wording won't help |

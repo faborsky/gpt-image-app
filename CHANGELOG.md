@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-08-23
+
+### Changed
+
+- **Transparent backgrounds now work on `gpt-image-2`.** OpenAI shipped them there
+  **in preview on 2026-08-20** ("Transparent backgrounds are now available in preview
+  for `gpt-image-2` and `gpt-image-2-2026-04-21`"), so the local guard that rejected
+  `background="transparent"` on the default model is gone — `MODELS_WITHOUT_TRANSPARENCY`
+  is now an empty set.
+
+  ```bash
+  ./run.sh generate "A single glossy red apple, centered, no shadow" -b transparent -f png
+  ```
+
+  The practical gain is that transparency and an arbitrary size are finally available in
+  the same call: the older models that could do transparency are limited to three fixed
+  sizes, `gpt-image-2` is not. Verified at 1072×1072.
+
+- **The guard itself stays, as a mechanism.** `validate_background_for_model()` still
+  enforces the container rule — transparency needs an alpha channel, so `-f jpeg` is
+  rejected locally (the API answers
+  `400 invalid_transparent_background_output_format`). A model that ever loses
+  transparency support only has to be listed in `MODELS_WITHOUT_TRANSPARENCY` again.
+
+### Verified against the live API (2026-08-23)
+
+- `images.generate` on `gpt-image-2` with `background="transparent"`: **png OK, webp OK**
+  — both genuine RGBA (PNG colour type 6). Corner pixels `alpha=0`, subject `alpha=253`,
+  so the transparency is real and not a nominal alpha channel.
+- `images.edit` (one reference) with `background="transparent"`: **OK, RGBA** — transparency
+  survives an edit round.
+- `output_format="jpeg"` with transparency: `400 invalid_transparent_background_output_format`
+  ("Transparent background is not supported for JPEG output format").
+- **Pricing is unaffected:** a transparent `low` 1024² call billed `20 in + 202 out` tokens
+  ($0.0062), same as an opaque one.
+
+### Notes
+
+- Preview status is the caveat worth carrying into automation: OpenAI can change the
+  behaviour without a release on our side.
+- Docs updated accordingly: [README](README.md#transparency), [CLAUDE.md](CLAUDE.md),
+  [docs/api-notes.md](docs/api-notes.md#transparency) and the bundled skill. The old
+  "route transparency to `gpt-image-1.5`" workaround has been removed everywhere.
+
 ## [1.1.0] — 2026-07-25
 
 ### Added

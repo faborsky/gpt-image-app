@@ -1,6 +1,6 @@
 # OpenAI Image API — how it actually behaves
 
-Field notes on the OpenAI Image API as used by this CLI. Verified against the official docs on **2026-07-25**; items found empirically are marked as such. This is the file to read when something breaks and the error message isn't enough.
+Field notes on the OpenAI Image API as used by this CLI. Verified against the official docs on **2026-07-25**, transparency re-verified **2026-08-23**; items found empirically are marked as such. This is the file to read when something breaks and the error message isn't enough.
 
 ## Models
 
@@ -8,7 +8,7 @@ Present on the API as of 2026-07-25 (verified via `client.models.list()`):
 
 | Model ID | Sizes | Transparency | Notes |
 |---|---|---|---|
-| `gpt-image-2` | arbitrary WxH within limits | **no** | Flagship, the default here. Also exposed as `gpt-image-2-2026-04-21`. |
+| `gpt-image-2` | arbitrary WxH within limits | yes (preview, 2026-08-20) | Flagship, the default here. Also exposed as `gpt-image-2-2026-04-21`. |
 | `gpt-image-1.5` | 3 fixed | yes | Previous flagship. |
 | `gpt-image-1-mini` | 3 fixed | yes | Cheapest. |
 | `gpt-image-1` | 3 fixed | yes | Legacy; slated to retire 2026-10-23. |
@@ -25,7 +25,7 @@ client.images.generate(
     prompt=prompt,
     size="1424x800",        # concrete pixels, not a ratio
     quality="high",         # low | medium | high | auto
-    background="auto",      # auto | opaque   (transparent NOT on gpt-image-2)
+    background="auto",      # auto | opaque | transparent   (transparent needs png/webp)
     output_format="png",    # png | jpeg | webp
     n=1,
 )
@@ -114,24 +114,35 @@ hatch worth testing.
 
 ## Transparency
 
-Per the docs, verbatim: *"gpt-image-2 doesn't currently support transparent backgrounds. Requests with `background: "transparent"` aren't supported for this model."*
+**This changed on 2026-08-20.** Changelog, verbatim: *"Transparent backgrounds are now available in preview for `gpt-image-2` and `gpt-image-2-2026-04-21`"* — in the Images API and in the Responses API image-generation tool, with `png` or `webp` output. The guide adds: *"jpeg isn't supported with transparent backgrounds."*
 
-`validate_background_for_model()` enforces this **locally, before the call**, and the error names the models that do support transparency. Two independent constraints are checked:
+Before that, `gpt-image-2` answered `400 image_generation_user_error` ("Transparent background is not supported for this model") and the CLI blocked it locally. **That guard is gone** — `MODELS_WITHOUT_TRANSPARENCY` is now an empty set. Only one constraint is left in `validate_background_for_model()`:
 
-1. Model support — only `gpt-image-1` / `1.5` / `mini` can do it.
-2. Container — transparency needs an alpha channel, so `jpeg` is impossible regardless of model.
+- Container — transparency needs an alpha channel, so `jpeg` is impossible on every model.
 
-**Verified live (2026-07-25).** The API rejects it with a clean, non-transient `400`:
+**Verified live (2026-08-23)** on `gpt-image-2`, `quality=low`:
+
+| Call | `output_format` | Result |
+|---|---|---|
+| `images.generate` | `png` | **OK** — 1024×1024 PNG colour type 6 (RGBA) |
+| `images.generate` | `webp` | **OK** — RGBA |
+| `images.generate` | `jpeg` | `400 invalid_transparent_background_output_format` |
+| `images.edit` (1 reference) | `png` | **OK** — RGBA, transparency survives an edit round |
+| CLI `generate -b transparent -f png` | `png` | **OK** at 1072×1072 — arbitrary size *and* transparency in one call |
+
+The transparency is real, not a nominal alpha channel: on the CLI output, alpha extrema were `(0, 254)`, all four corners `alpha=0`, subject centre `alpha=253`. Note the max is 254 rather than 255 — the subject is a hair short of fully opaque, irrelevant for compositing but worth knowing if you assert on exact alpha values.
+
+The JPEG rejection is a `400`, not a `5xx`, so `is_retryable_error()` correctly refuses to retry it — and the local guard means the request never leaves the machine anyway:
 
 ```
-400 - {'error': {'message': 'Transparent background is not supported for this model.',
+400 - {'error': {'message': 'Transparent background is not supported for JPEG output format',
                  'type': 'image_generation_user_error',
-                 'param': 'background', 'code': 'invalid_value'}}
+                 'param': None, 'code': 'invalid_transparent_background_output_format'}}
 ```
 
-Note the code is `400`, not `5xx` — so `is_retryable_error()` correctly refuses to retry it, and the local guard means the request never leaves the machine in the first place.
+**Preview status is the caveat.** The feature is labelled preview by OpenAI, so behaviour may change without a version bump on our side. The guard is data-driven: if a model loses support, add its ID to `MODELS_WITHOUT_TRANSPARENCY` and the CLI catches it again before spending a call.
 
-The documented workaround was verified too: `gpt-image-1.5` with `background="transparent"` and `output_format="png"` returns a genuine **RGBA** image with actually transparent pixels (checked via PIL's alpha channel extrema, not just the mode flag).
+Pricing is unaffected — a transparent `low` 1024² call billed `20 in + 202 out` tokens ($0.0062), the same as an opaque one.
 
 ## Response shape
 

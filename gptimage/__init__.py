@@ -4,4 +4,4 @@ Uses an aspect-ratio + resolution vocabulary so the same flags work across model
 that accept arbitrary dimensions and models limited to three fixed sizes.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

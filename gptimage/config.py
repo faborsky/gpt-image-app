@@ -51,9 +51,12 @@ FALLBACK_COST: dict[str, dict[str, float]] = {
 
 VALID_MODELS: set[str] = set(MODEL_PRICING.keys())
 
-# gpt-image-2 rejects background="transparent" outright: "gpt-image-2 doesn't
-# currently support transparent backgrounds." The older models still accept it.
-MODELS_WITHOUT_TRANSPARENCY: frozenset[str] = frozenset({"gpt-image-2"})
+# Every current model accepts background="transparent". gpt-image-2 used to reject it,
+# but transparency shipped for it in preview on 2026-08-20 ("Transparent backgrounds are
+# now available in preview for gpt-image-2 and gpt-image-2-2026-04-21"). Verified live
+# 2026-08-23: png and webp both come back as genuine RGBA, on generate and on edit.
+# The guard stays as a mechanism — put a model ID here if one ever drops support.
+MODELS_WITHOUT_TRANSPARENCY: frozenset[str] = frozenset()
 
 # gpt-image-2 rejects input_fidelity with a 400: "The model 'gpt-image-2' does not
 # support the 'input_fidelity' parameter." Per the docs it processes every image
@@ -375,8 +378,10 @@ def validate_background_for_model(background: str, model: str, output_format: st
     Check that the requested background is actually possible for this model/format.
 
     Two independent constraints:
-      1. gpt-image-2 does not support transparency at all.
-      2. Transparency needs an alpha-capable container, so jpeg is out.
+      1. The model has to support transparency (all current ones do, see
+         MODELS_WITHOUT_TRANSPARENCY).
+      2. Transparency needs an alpha-capable container, so jpeg is out — the API
+         answers a 400 `invalid_transparent_background_output_format`.
 
     Args:
         background: "auto", "transparent" or "opaque".

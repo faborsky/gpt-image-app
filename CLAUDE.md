@@ -33,7 +33,7 @@ Python CLI that generates images through OpenAI's Image API (`gpt-image-2` and s
 ## Models
 
 ```python
-MODEL_NAME = "gpt-image-2"              # default; arbitrary sizes, NO transparency
+MODEL_NAME = "gpt-image-2"              # default; arbitrary sizes + transparency (preview)
 DESCRIBE_MODEL_NAME = "gpt-5.4-mini"    # vision model behind `describe`
 ```
 
@@ -41,7 +41,7 @@ Also selectable: `gpt-image-1.5`, `gpt-image-1-mini` (cheapest), `gpt-image-1` (
 
 ## ⚠️ Critical for automation (read before scripting)
 
-- **`gpt-image-2` rejects `background="transparent"`.** `validate_background_for_model()` catches this locally before spending a call and names the models that do support it. Never route a transparency request to `gpt-image-2` and hope.
+- **Transparency now works on every model, `gpt-image-2` included** — it shipped there **in preview on 2026-08-20** and was verified live on 2026-08-23 (RGBA on `generate` and on `-ref` edits, PNG and WebP). The old "route transparency to `gpt-image-1.5`" workaround is obsolete; don't reintroduce it. `MODELS_WITHOUT_TRANSPARENCY` is now empty but the guard stays as a mechanism. What `validate_background_for_model()` still enforces: **transparency never fits in a JPEG** (no alpha channel) — caught locally, API answers `400 invalid_transparent_background_output_format`.
 - **`gpt-image-2` has an undocumented ~1 MP minimum pixel budget.** Sizes below it fail with "below the current minimum pixel budget" — found in live testing, absent from the docs. This is why `aspect_res_to_size()` sizes by **AREA, not long edge**: 16:9 @ 1K by long edge would be 1024×576 = 0.59 MP and would be rejected. Do not "simplify" that function.
 - **Quality is the dominant cost lever: `high` ≈ 35× `low`** ($0.211 vs $0.006 at 1024²). Draft on `low`, final on `high`. This matters far more than resolution.
 - **Cost comes from the API's real `usage` when available**, falling back to a published per-image table. `cost_source` in the JSON says which — `actual (…)` vs `estimate (…)`. Report the actual figure, not the estimate.
