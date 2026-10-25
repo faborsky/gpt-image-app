@@ -80,3 +80,7 @@ Bump `__version__` in `gptimage/__init__.py` and `version` in `pyproject.toml` �
 - **[docs/api-notes.md](docs/api-notes.md)** — how the OpenAI Image API actually behaves: request/response shape, the pixel-budget constraint, error codes, rate limit tiers, pricing mechanics, known gaps.
 - **[CHANGELOG.md](CHANGELOG.md)** — version history.
 - **`skill/gptimage/`** — the bundled Claude Code skill (`/gptimage`). `skill/INSTALL.md` is the Czech install guide.
+
+## README languages
+
+`README.md` = English, full, source of truth. `README.cs.md` = full Czech. `i18n/README.<lang>.md` = short versions (es, pt-BR, de, fr, zh-CN, ja, sv, nb, da). A README change updates both full versions in the same commit; `i18n/` only when the quick start, main features or name change. Author links: faborsky.com in EN/i18n, faborsky.cz + aifirst.cz in Czech.

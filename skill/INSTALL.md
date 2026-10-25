@@ -2,7 +2,7 @@
 
 Tahle složka obsahuje **skill pro Claude Code**, který obaluje CLI aplikaci v tomhle repu a přidává know-how ke generování obrázků přes OpenAI — ceny podle kvality, rozdíly mezi modely, oficiální pravidla promptování a co modely umí a neumí. Po instalaci ho v Claude Code vyvoláš jako `/gptimage`.
 
-> Skill bez aplikace nefunguje — nejdřív zprovozni samotnou appku podle hlavního [`README.md`](../README.md) (`./setup.sh` + klíč v `.env`).
+> Skill bez aplikace nefunguje — nejdřív zprovozni samotnou appku podle hlavního [`README.cs.md`](../README.cs.md) (`./setup.sh` + klíč v `.env`).
 
 ## Předpoklady
 
